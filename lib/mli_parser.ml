@@ -58,14 +58,17 @@ let extract_code_blocks ~(location : Lexing.position) ~docstring =
     List.map
       (fun block ->
         match Odoc_parser.Loc.value block with
-        | `Code_block (metadata, { Odoc_parser.Loc.value = contents; _ }) ->
+        | `Code_block
+            ( metadata,
+              { Odoc_parser.Loc.value = contents; location = code_block_loc } )
+          ->
             let metadata =
               Option.map
                 (fun (language_tag, labels) ->
                   Code_block.{ language_tag; labels })
                 metadata
             in
-            [ { Code_block.location = block.location; metadata; contents } ]
+            [ { Code_block.location = code_block_loc; metadata; contents } ]
         | `List (_, _, lists) -> List.map acc lists |> List.concat
         | _ -> [])
       blocks
@@ -156,27 +159,27 @@ let make_block ~loc code_block =
       Block.mk ~loc ~section:None ~labels ~header ~contents ~legacy_labels:false
         ~errors:[]
 
-let code_block_markup code_block =
-  let open Document in
-  let opening =
-    match code_block.Code_block.metadata with
-    | Some { language_tag; labels } ->
-        let labels =
-          match labels with
-          | Some s -> [ Text " "; Text (Odoc_parser.Loc.value s) ]
-          | None -> []
-        in
-        [ Text "{@"; Text (Odoc_parser.Loc.value language_tag) ]
-        @ labels @ [ Text "[" ]
-    | None -> [ Text "{[" ]
-  in
-  let hpad =
-    let has_several_lines = String.contains code_block.contents '\n' in
-    let column = code_block.location.start.column in
-    if not has_several_lines then ""
-    else Astring.String.v ~len:column (fun _ -> ' ')
-  in
-  (opening, [ Text (hpad ^ "]}") ])
+(* let code_block_markup code_block = *)
+(*   let open Document in *)
+(*   let opening = *)
+(*     match code_block.Code_block.metadata with *)
+(*     | Some { language_tag; labels } -> *)
+(*         let labels = *)
+(*           match labels with *)
+(*           | Some s -> [ Text " "; Text (Odoc_parser.Loc.value s) ] *)
+(*           | None -> [] *)
+(*         in *)
+(*         [ Text "{@"; Text (Odoc_parser.Loc.value language_tag) ] *)
+(*         @ labels @ [ Text "[" ] *)
+(*     | None -> [ Text "{[" ] *)
+(*   in *)
+(*   let hpad = *)
+(*     let has_several_lines = String.contains code_block.contents '\n' in *)
+(*     let column = code_block.location.start.column in *)
+(*     if not has_several_lines then "" *)
+(*     else Astring.String.v ~len:column (fun _ -> ' ') *)
+(*   in *)
+(*   (opening, [ Text (hpad ^ "]}") ]) *)
 
 let parse_mli file_contents =
   (* Find the locations of the code blocks within [file_contents], then slice it up into
@@ -192,15 +195,20 @@ let parse_mli file_contents =
           Document.Text
             (slice lines ~start:!cursor ~end_:code_block.location.start)
         in
+        let contents =
+          slice lines ~start:code_block.location.start
+            ~end_:code_block.location.end_
+        in
+        let code_block = { code_block with contents } in
         let block =
           match make_block ~loc code_block with
           | Ok block -> Document.Block block
           | Error (`Msg msg) ->
               failwith (Fmt.str "Error creating block: %s" msg)
         in
-        let opening, closing = code_block_markup code_block in
+        (* let opening, closing = code_block_markup code_block in *)
         cursor := code_block.location.end_;
-        [ pre_text ] @ opening @ [ block ] @ closing)
+        [ pre_text ] @ [ block ])
       code_blocks
     |> List.concat
   in
